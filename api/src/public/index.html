@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Dashboard</title>
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-card: #1a1a24;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --border: #2d2d3a;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, var(--accent), #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+
+        header p {
+            color: var(--text-secondary);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 2rem;
+        }
+
+        @media (max-width: 900px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1.5rem;
+        }
+
+        .card h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        label {
+            display: block;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        button {
+            width: 100%;
+            padding: 0.875rem;
+            background: linear-gradient(135deg, var(--accent), #7c3aed);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(99, 102, 241, 0.3);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .status-item {
+            background: var(--bg-secondary);
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+        }
+
+        .status-item span {
+            font-weight: 700;
+            font-size: 1.25rem;
+        }
+
+        .payment-list {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .payment-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            transition: border-color 0.2s;
+        }
+
+        .payment-item:hover {
+            border-color: var(--accent);
+        }
+
+        .payment-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+
+        .payment-id {
+            font-family: monospace;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .payment-amount {
+            font-size: 1.25rem;
+            font-weight: 700;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-created { background: #3b82f6; }
+        .badge-processing { background: #f59e0b; animation: pulse 1.5s infinite; }
+        .badge-success { background: #22c55e; }
+        .badge-failed { background: #ef4444; }
+        .badge-retry_scheduled { background: #8b5cf6; }
+        .badge-dead_lettered { background: #6b7280; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .payment-meta {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            padding: 1rem 1.5rem;
+            border-radius: 12px;
+            color: white;
+            font-weight: 500;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast-success { background: var(--success); }
+        .toast-error { background: var(--error); }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+
+        .refresh-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            padding: 0.5rem 1rem;
+            width: auto;
+            font-size: 0.875rem;
+        }
+
+        .header-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>💳 Payment Dashboard</h1>
+            <p>Distributed Payment Processing System</p>
+        </header>
+
+        <div class="grid">
+            <div class="card">
+                <h2>➕ Create Payment</h2>
+                <form id="paymentForm">
+                    <div class="form-group">
+                        <label for="idempotencyKey">Idempotency Key</label>
+                        <input type="text" id="idempotencyKey" placeholder="e.g., order-12345" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="amount">Amount (cents)</label>
+                        <input type="number" id="amount" placeholder="1000" min="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="currency">Currency</label>
+                        <select id="currency">
+                            <option value="USD">USD - US Dollar</option>
+                            <option value="EUR">EUR - Euro</option>
+                            <option value="GBP">GBP - British Pound</option>
+                            <option value="INR">INR - Indian Rupee</option>
+                        </select>
+                    </div>
+                    <button type="submit" id="submitBtn">Create Payment</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <div class="header-actions">
+                    <h2>📋 Payments</h2>
+                    <button class="refresh-btn" onclick="loadPayments()">🔄 Refresh</button>
+                </div>
+
+                <div class="status-bar">
+                    <div class="status-item">Total: <span id="totalCount">0</span></div>
+                    <div class="status-item">✅ Success: <span id="successCount">0</span></div>
+                    <div class="status-item">⏳ Pending: <span id="pendingCount">0</span></div>
+                    <div class="status-item">❌ Failed: <span id="failedCount">0</span></div>
+                </div>
+
+                <div class="payment-list" id="paymentList">
+                    <div class="empty-state">No payments yet. Create one!</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        const API_URL = '';
+
+        // Generate unique idempotency key
+        document.getElementById('idempotencyKey').value = 'pay-' + Date.now();
+
+        // Toast notification
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast toast-${type} show`;
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // Format currency
+        function formatAmount(amount, currency) {
+            const symbols = { USD: '$', EUR: '€', GBP: '£', INR: '₹' };
+            return `${symbols[currency] || ''}${(amount / 100).toFixed(2)}`;
+        }
+
+        // Format date
+        function formatDate(dateStr) {
+            return new Date(dateStr).toLocaleString();
+        }
+
+        // Load payments from database
+        async function loadPayments() {
+            try {
+                const response = await fetch(`${API_URL}/payments`);
+                if (!response.ok) throw new Error('Failed to load');
+                
+                const data = await response.json();
+                renderPayments(data.payments || []);
+            } catch (error) {
+                console.log('Could not load payments list');
+            }
+        }
+
+        // Render payment list
+        function renderPayments(payments) {
+            const list = document.getElementById('paymentList');
+            
+            if (payments.length === 0) {
+                list.innerHTML = '<div class="empty-state">No payments yet. Create one!</div>';
+                return;
+            }
+
+            // Update stats
+            document.getElementById('totalCount').textContent = payments.length;
+            document.getElementById('successCount').textContent = payments.filter(p => p.status === 'SUCCESS').length;
+            document.getElementById('pendingCount').textContent = payments.filter(p => ['CREATED', 'PROCESSING', 'RETRY_SCHEDULED'].includes(p.status)).length;
+            document.getElementById('failedCount').textContent = payments.filter(p => ['FAILED', 'DEAD_LETTERED'].includes(p.status)).length;
+
+            list.innerHTML = payments.map(p => `
+                <div class="payment-item">
+                    <div class="payment-header">
+                        <div>
+                            <div class="payment-amount">${formatAmount(p.amount, p.currency)}</div>
+                            <div class="payment-id">${p.id}</div>
+                        </div>
+                        <span class="badge badge-${p.status.toLowerCase()}">${p.status}</span>
+                    </div>
+                    <div class="payment-meta">
+                        <span>🔑 ${p.idempotency_key}</span>
+                        <span>🔄 Retries: ${p.retry_count}/${p.max_retries}</span>
+                        <span>📅 ${formatDate(p.created_at)}</span>
+                    </div>
+                    ${p.failure_reason ? `<div class="payment-meta" style="color: var(--error);">⚠️ ${p.failure_reason}</div>` : ''}
+                </div>
+            `).join('');
+        }
+
+        // Add payment to list (for immediate feedback)
+        function addPaymentToList(payment, created) {
+            const list = document.getElementById('paymentList');
+            const emptyState = list.querySelector('.empty-state');
+            if (emptyState) emptyState.remove();
+
+            const item = document.createElement('div');
+            item.className = 'payment-item';
+            item.style.borderColor = created ? 'var(--accent)' : 'var(--warning)';
+            item.innerHTML = `
+                <div class="payment-header">
+                    <div>
+                        <div class="payment-amount">${formatAmount(payment.amount, payment.currency)}</div>
+                        <div class="payment-id">${payment.id}</div>
+                    </div>
+                    <span class="badge badge-${payment.status.toLowerCase()}">${payment.status}</span>
+                </div>
+                <div class="payment-meta">
+                    <span>🔑 ${payment.idempotency_key}</span>
+                    <span>🔄 Retries: ${payment.retry_count}/${payment.max_retries}</span>
+                    <span>📅 ${formatDate(payment.created_at)}</span>
+                </div>
+            `;
+            list.insertBefore(item, list.firstChild);
+
+            // Update total count
+            const total = document.getElementById('totalCount');
+            total.textContent = parseInt(total.textContent || 0) + (created ? 1 : 0);
+        }
+
+        // Handle form submit
+        document.getElementById('paymentForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.textContent = 'Processing...';
+
+            const idempotencyKey = document.getElementById('idempotencyKey').value;
+            const amount = parseInt(document.getElementById('amount').value);
+            const currency = document.getElementById('currency').value;
+
+            try {
+                const response = await fetch(`${API_URL}/payments`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Idempotency-Key': idempotencyKey
+                    },
+                    body: JSON.stringify({ amount, currency })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    addPaymentToList(data.payment, data.created);
+                    showToast(data.created ? 'Payment created!' : 'Payment already exists (idempotent)', 'success');
+                    
+                    // Reset form with new key
+                    document.getElementById('idempotencyKey').value = 'pay-' + Date.now();
+                    document.getElementById('amount').value = '';
+                } else {
+                    showToast(data.message || 'Failed to create payment', 'error');
+                }
+            } catch (error) {
+                showToast('Network error: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Create Payment';
+            }
+        });
+
+        // Auto-refresh every 5 seconds
+        setInterval(loadPayments, 5000);
+        loadPayments();
+    </script>
+</body>
+</html>

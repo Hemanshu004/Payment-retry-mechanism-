@@ -1,0 +1,134 @@
+version: '3.8'
+
+services:
+  # =============================================================================
+  # PostgreSQL - SOURCE OF TRUTH
+  # =============================================================================
+  # The ONLY authoritative source for payment state. All payment records,
+  # idempotency enforcement, and state machine transitions happen here.
+  # Row-level locking (SELECT FOR UPDATE) prevents double-processing.
+  # =============================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: payment-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # =============================================================================
+  # RabbitMQ - ASYNC JOB QUEUE
+  # =============================================================================
+  # Decouples API from payment processing. Provides at-least-once delivery
+  # (messages may be duplicated). Workers MUST be idempotent.
+  # Management UI available at http://localhost:15672
+  # =============================================================================
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: payment-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    ports:
+      - "5672:5672"   # AMQP protocol
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # =============================================================================
+  # Redis - DISTRIBUTED LOCKS & CACHING
+  # =============================================================================
+  # Used for distributed locks to prevent concurrent processing of the same
+  # payment across multiple workers. NOT the source of truth - PostgreSQL is.
+  # If Redis data is lost, system continues to function (DB is authoritative).
+  # =============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: payment-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # =============================================================================
+  # API Service - HTTP INTERFACE (NestJS)
+  # =============================================================================
+  # Accepts payment requests, validates idempotency keys, publishes jobs.
+  # NEVER calls payment gateway directly - only publishes to queue.
+  # This separation ensures all payment processing is async and retry-safe.
+  # =============================================================================
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: payment-api
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - API_PORT=${API_PORT}
+      - DATABASE_URL=${DATABASE_URL}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - REDIS_URL=${REDIS_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # =============================================================================
+  # Worker Service - PAYMENT PROCESSOR
+  # =============================================================================
+  # Consumes queue messages, executes payments via mock gateway, handles retries.
+  # ONLY component that calls payment gateway. Uses SELECT FOR UPDATE to lock
+  # payments during processing. Manual ACK only after DB commit.
+  # =============================================================================
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: payment-worker
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - DATABASE_URL=${DATABASE_URL}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - REDIS_URL=${REDIS_URL}
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  redis_data:
