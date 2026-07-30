@@ -2,11 +2,7 @@ version: '3.8'
 
 services:
   # =============================================================================
-  # PostgreSQL - SOURCE OF TRUTH
-  # =============================================================================
-  # The ONLY authoritative source for payment state. All payment records,
-  # idempotency enforcement, and state machine transitions happen here.
-  # Row-level locking (SELECT FOR UPDATE) prevents double-processing.
+  # PostgreSQL — SOURCE OF TRUTH
   # =============================================================================
   postgres:
     image: postgres:15-alpine
@@ -27,40 +23,15 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # RabbitMQ - ASYNC JOB QUEUE
+  # Redis — JOB QUEUE BACKING STORE (BullMQ)
   # =============================================================================
-  # Decouples API from payment processing. Provides at-least-once delivery
-  # (messages may be duplicated). Workers MUST be idempotent.
-  # Management UI available at http://localhost:15672
-  # =============================================================================
-  rabbitmq:
-    image: rabbitmq:3-management-alpine
-    container_name: payment-rabbitmq
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
-    ports:
-      - "5672:5672"   # AMQP protocol
-      - "15672:15672" # Management UI
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 10s
-      retries: 5
-    restart: unless-stopped
-
-  # =============================================================================
-  # Redis - DISTRIBUTED LOCKS & CACHING
-  # =============================================================================
-  # Used for distributed locks to prevent concurrent processing of the same
-  # payment across multiple workers. NOT the source of truth - PostgreSQL is.
-  # If Redis data is lost, system continues to function (DB is authoritative).
+  # Persists BullMQ jobs. Uses AOF (Append Only File) to minimize data loss.
+  # PostgreSQL remains the ultimate source of truth.
   # =============================================================================
   redis:
     image: redis:7-alpine
     container_name: payment-redis
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory-policy noeviction
     ports:
       - "6379:6379"
     volumes:
@@ -73,11 +44,34 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # API Service - HTTP INTERFACE (NestJS)
+  # Database Migration — runs once, then exits
   # =============================================================================
-  # Accepts payment requests, validates idempotency keys, publishes jobs.
-  # NEVER calls payment gateway directly - only publishes to queue.
-  # This separation ensures all payment processing is async and retry-safe.
+  db-migrate:
+    image: postgres:15-alpine
+    container_name: payment-db-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+    volumes:
+      - ./database/migrations:/migrations:ro
+    entrypoint: >
+      sh -c '
+        echo "Running database migrations...";
+        for f in /migrations/*.sql; do
+          echo "Applying $$f";
+          psql -f "$$f";
+        done;
+        echo "Migrations complete.";
+      '
+    restart: "no"
+
+  # =============================================================================
+  # API Service — HTTP INTERFACE (Express)
   # =============================================================================
   api:
     build:
@@ -90,23 +84,16 @@ services:
       - NODE_ENV=${NODE_ENV}
       - API_PORT=${API_PORT}
       - DATABASE_URL=${DATABASE_URL}
-      - RABBITMQ_URL=${RABBITMQ_URL}
       - REDIS_URL=${REDIS_URL}
     depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     restart: unless-stopped
 
   # =============================================================================
-  # Worker Service - PAYMENT PROCESSOR
-  # =============================================================================
-  # Consumes queue messages, executes payments via mock gateway, handles retries.
-  # ONLY component that calls payment gateway. Uses SELECT FOR UPDATE to lock
-  # payments during processing. Manual ACK only after DB commit.
+  # Worker Service — PAYMENT PROCESSOR (BullMQ Worker)
   # =============================================================================
   worker:
     build:
@@ -116,19 +103,17 @@ services:
     environment:
       - NODE_ENV=${NODE_ENV}
       - DATABASE_URL=${DATABASE_URL}
-      - RABBITMQ_URL=${RABBITMQ_URL}
       - REDIS_URL=${REDIS_URL}
       - WORKER_CONCURRENCY=${WORKER_CONCURRENCY}
+      - GATEWAY_SUCCESS_RATE=${GATEWAY_SUCCESS_RATE:-70}
+      - GATEWAY_RETRYABLE_RATE=${GATEWAY_RETRYABLE_RATE:-20}
     depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     restart: unless-stopped
 
 volumes:
   postgres_data:
-  rabbitmq_data:
   redis_data:

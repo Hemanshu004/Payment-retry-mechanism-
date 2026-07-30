@@ -1,313 +1,134 @@
-# Distributed Payment Processing System
+# Payment Retry Mechanism
 
-A production-grade, interview-defensible payment processing system built with TypeScript, NestJS, PostgreSQL, and RabbitMQ.
+A distributed payment processing backend that mimics how a real production system handles payments, failures, and retries. 
+
+I wanted to build a payment backend that behaves more like a real production system instead of a simple CRUD application. The main focus was reliability, idempotency, retries, and recovery from failures. Instead of blindly trusting network requests, this system uses a database-first approach and delegates asynchronous retry scheduling to a background job queue.
+
+## Features
+
+- **Idempotent payment creation**: Ensures users are never double-charged by safely ignoring duplicate requests.
+- **PostgreSQL as source of truth**: All state transitions and locks are strictly managed in the database, meaning no data is lost if the queue or workers crash.
+- **Background job processing**: Uses BullMQ (backed by Redis) to decouple the fast API layer from the slow payment gateway.
+- **Automatic retries**: Temporary network errors trigger automatic retries without blocking the main API.
+- **Exponential backoff**: Retry delays increase exponentially to prevent overwhelming the payment gateway during an outage.
+- **Dead letter handling**: Payments that exhaust all retry attempts are safely marked as dead-lettered for manual review.
+- **Recovery scanner**: A background reconciliation process picks up any payments that were saved to the database but failed to reach the queue.
+- **Docker support**: Fully containerized setup for easy local development.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         PAYMENT PROCESSING SYSTEM                            │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   Client                                                                     │
-│     │                                                                        │
-│     │ POST /payments                                                         │
-│     │ Idempotency-Key: abc123                                               │
-│     ▼                                                                        │
-│   ┌───────────────────────────────────────────────────────────────┐         │
-│   │                    API SERVICE (NestJS)                        │         │
-│   │  • Validates request & idempotency key                        │         │
-│   │  • Creates payment record in PostgreSQL                       │         │
-│   │  • Publishes job to RabbitMQ AFTER commit                     │         │
-│   │  • NEVER calls payment gateway                                │         │
-│   └─────────────────────────┬─────────────────────────────────────┘         │
-│                             │                                                │
-│              ┌──────────────┼──────────────┐                                │
-│              ▼              ▼              │                                │
-│   ┌──────────────┐   ┌─────────────┐      │                                │
-│   │  PostgreSQL  │   │  RabbitMQ   │      │                                │
-│   │   (SOURCE    │   │   (Job      │      │                                │
-│   │   OF TRUTH)  │   │   Queue)    │      │                                │
-│   └──────────────┘   └──────┬──────┘      │                                │
-│              ▲              │              │                                │
-│              │              ▼              │                                │
-│   ┌──────────┴────────────────────────────┴──────────────────────┐         │
-│   │                   WORKER SERVICE                              │         │
-│   │  • Consumes messages from RabbitMQ                           │         │
-│   │  • Locks payment with SELECT FOR UPDATE                      │         │
-│   │  • Calls mock payment gateway                                │         │
-│   │  • Updates state with retry logic                            │         │
-│   │  • ACKs message AFTER DB commit                              │         │
-│   └───────────────────────────────────────────────────────────────┘         │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+Client -> Express API -> PostgreSQL -> BullMQ -> Worker -> Gateway
 
-## Payment State Machine
+- **Client**: Initiates the payment request with a unique idempotency key.
+- **Express API**: Receives the request, validates it, and inserts it into PostgreSQL. It intentionally avoids calling the payment gateway directly to ensure low latency and high availability.
+- **PostgreSQL**: Acts as the absolute source of truth. It enforces uniqueness to prevent duplicates and provides row-level locks so multiple workers don't process the same payment at the exact same time.
+- **BullMQ (Redis)**: Acts strictly as a job scheduler. It holds the queue of pending payments and automatically handles delayed retries if the gateway fails.
+- **Worker**: An independent Node.js process that picks up jobs from BullMQ, acquires a database lock, and coordinates the actual payment processing.
+- **Gateway**: A mock external payment provider (like Stripe or PayPal) that simulates latency, random failures, and successes.
 
-```
-                                    ┌─────────────────┐
-                                    │                 │
-                                    ▼                 │
-┌─────────┐    ┌────────────┐    ┌─────────┐    ┌────┴────────────┐
-│ CREATED │───▶│ PROCESSING │───▶│ SUCCESS │    │ RETRY_SCHEDULED │
-└─────────┘    └────────────┘    └─────────┘    └─────────────────┘
-                     │                                   │
-                     │           ┌────────┐              │
-                     └──────────▶│ FAILED │              │
-                     │           └────────┘              │
-                     │                                   │
-                     │      ┌───────────────┐           │
-                     └─────▶│ DEAD_LETTERED │◀──────────┘
-                            └───────────────┘     (after max retries)
+## Payment Lifecycle
 
-Terminal States: SUCCESS, FAILED, DEAD_LETTERED
-```
+1. **CREATED**: The initial state when a payment is safely stored in PostgreSQL, but hasn't been processed yet.
+2. **PROCESSING**: The worker has locked the row and is actively communicating with the payment gateway.
+3. **SUCCESS**: The gateway confirmed the payment was successfully processed.
+4. **RETRY_SCHEDULED**: The gateway returned a temporary error (like a timeout). The job is delayed and will be tried again soon.
+5. **FAILED**: The gateway returned a permanent error (like insufficient funds or an invalid card). No further retries are attempted.
+6. **DEAD_LETTERED**: The payment encountered temporary errors repeatedly and exhausted the maximum number of retry attempts.
 
-## Quick Start
+## Retry Strategy
 
-```bash
-# Start the entire system
-docker compose up --build
+When the worker encounters a temporary failure from the payment gateway, it updates the database status to `RETRY_SCHEDULED` and delegates the retry logic to BullMQ.
 
-# Test creating a payment
-curl -X POST http://localhost:3000/payments \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: my-unique-key-123" \
-  -d '{"amount": 1000, "currency": "USD"}'
+BullMQ uses an exponential backoff strategy (starting at 2 seconds) to delay the next attempt. This is much cleaner than writing a custom retry loop because the worker is immediately freed up to process other payments. If the payment fails 5 times consecutively, it hits the maximum attempt limit and transitions into the `DEAD_LETTERED` state.
 
-# Test idempotency (same key returns same payment)
-curl -X POST http://localhost:3000/payments \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: my-unique-key-123" \
-  -d '{"amount": 1000, "currency": "USD"}'
-```
+## Idempotency
+
+Duplicate payments are dangerous. If a user has a slow internet connection and impatiently clicks the "Pay" button three times, the API will receive three identical requests. 
+
+To solve this, the client generates a unique `Idempotency-Key` and sends it in the request headers. We map this key to a `UNIQUE` constraint in PostgreSQL. When the second and third requests arrive, the database rejects the duplicate inserts. The API catches this constraint violation and simply returns the original payment record instead of trying to charge the user again.
+
+## Recovery Mechanism
+
+Network partitions happen. Sometimes the Express API will successfully commit the `CREATED` payment to PostgreSQL, but crash right before it can enqueue the job into BullMQ (or Redis might be temporarily offline).
+
+To handle this, a reconciliation scanner runs in the background. It periodically looks for payments that have been stuck in the `CREATED` state for too long and safely pushes them into BullMQ. Because PostgreSQL is the source of truth, we never lose a payment request just because the queue was momentarily unavailable.
 
 ## Tech Stack
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| API | NestJS + TypeScript | HTTP interface, validation, idempotency |
-| Worker | Node.js + TypeScript | Payment processing, retries |
-| Database | PostgreSQL 15 | **Source of truth**, state machine |
-| Queue | RabbitMQ 3 | Async job delivery (at-least-once) |
-| Cache | Redis 7 | Distributed locks (optional) |
-| Logging | Pino | Structured JSON logs |
-
-## Key Design Decisions
-
-### 1. PostgreSQL is the ONLY Source of Truth
-
-- All payment state lives in PostgreSQL
-- RabbitMQ messages can be duplicated or lost
-- Workers are idempotent and check DB state before processing
-
-### 2. Idempotency via UNIQUE Constraint
-
-```sql
-UNIQUE (idempotency_key)
-```
-
-If two identical requests arrive simultaneously:
-1. Request A: INSERT succeeds
-2. Request B: UNIQUE violation → SELECT existing → return same payment
-
-**Result:** Customer is never double-charged.
-
-### 3. Publish AFTER Commit
-
-```typescript
-await client.query('COMMIT');  // State persisted
-await rabbitmq.publishPaymentJob(paymentId);  // Then publish
-```
-
-Why? If we publish before commit and the commit fails, we'd have a phantom job in the queue.
-
-### 4. SELECT FOR UPDATE Prevents Concurrent Processing
-
-```sql
-SELECT * FROM payments WHERE id = $1 FOR UPDATE NOWAIT
-```
-
-If two workers try to process the same payment:
-1. Worker A: Acquires lock
-2. Worker B: NOWAIT throws error → re-queues message
-3. Worker A: Completes processing
-
-### 5. Manual ACK After Commit
-
-```typescript
-await client.query('COMMIT');  // State persisted
-channel.ack(msg);  // Then ACK
-```
-
-If worker crashes after processing but before ACK, the message is redelivered. The worker checks state and skips already-processed payments.
-
-## Failure Scenarios
-
-| Scenario | Behavior |
-|----------|----------|
-| API crashes after INSERT, before publish | Payment in CREATED, retry scanner picks it up |
-| Worker crashes during PROCESSING | Message redelivered, worker re-locks and continues |
-| Worker crashes after gateway call, before commit | Message redelivered, worker detects PROCESSING state |
-| Database temporarily unavailable | Both services retry with exponential backoff |
-| RabbitMQ unavailable | API returns 500, payment stays in CREATED |
-| Duplicate message from RabbitMQ | Worker checks state, skips if not CREATED/RETRY_SCHEDULED |
-
-## Retry Algorithm
-
-Exponential backoff with jitter:
-
-```
-next_retry_at = NOW() + base_delay * (2 ^ retry_count)
-```
-
-| Retry | Delay |
-|-------|-------|
-| 1 | 2 seconds |
-| 2 | 4 seconds |
-| 3 | 8 seconds |
-| 4 | 16 seconds |
-| 5 | Dead-lettered |
-
-## Environment Variables
-
-```bash
-# PostgreSQL
-POSTGRES_USER=payments
-POSTGRES_PASSWORD=payments_secret_2024
-POSTGRES_DB=payments
-DATABASE_URL=postgresql://payments:payments_secret_2024@postgres:5432/payments
-
-# RabbitMQ
-RABBITMQ_DEFAULT_USER=payments
-RABBITMQ_DEFAULT_PASS=rabbitmq_secret_2024
-RABBITMQ_URL=amqp://payments:rabbitmq_secret_2024@rabbitmq:5672
-
-# Redis
-REDIS_URL=redis://redis:6379
-
-# API
-API_PORT=3000
-
-# Worker
-WORKER_CONCURRENCY=1
-GATEWAY_SUCCESS_RATE=70
-GATEWAY_RETRYABLE_RATE=20
-```
-
-## API Reference
-
-### POST /payments
-
-Create a new payment.
-
-**Headers:**
-- `Content-Type: application/json`
-- `Idempotency-Key: <unique-string>` (required)
-
-**Request:**
-```json
-{
-  "amount": 1000,
-  "currency": "USD"
-}
-```
-
-**Response (201 Created):**
-```json
-{
-  "payment": {
-    "id": "uuid",
-    "idempotency_key": "unique-key",
-    "amount": 1000,
-    "currency": "USD",
-    "status": "CREATED",
-    "retry_count": 0,
-    "max_retries": 5,
-    "next_retry_at": null,
-    "failure_reason": null,
-    "created_at": "2024-01-15T10:00:00Z",
-    "updated_at": "2024-01-15T10:00:00Z"
-  },
-  "created": true
-}
-```
-
-**Response (200 OK - Idempotent):**
-```json
-{
-  "payment": { /* existing payment */ },
-  "created": false
-}
-```
-
-### GET /health
-
-Health check endpoint.
-
-**Response:**
-```json
-{
-  "status": "ok",
-  "timestamp": "2024-01-15T10:00:00Z"
-}
-```
-
-## Monitoring
-
-### RabbitMQ Management UI
-- URL: http://localhost:15672
-- Credentials: See RABBITMQ_DEFAULT_USER/PASS in .env
-
-### Logs
-
-```bash
-# View API logs
-docker logs -f payment-api
-
-# View Worker logs (JSON structured)
-docker logs -f payment-worker
-
-# View specific payment processing
-docker logs payment-worker 2>&1 | grep "payment-id-here"
-```
+| Component | Technology |
+|---|---|
+| Backend | Node.js, Express |
+| Queue | BullMQ, Redis |
+| Database | PostgreSQL 15 |
+| ORM/Driver | pg (node-postgres) |
+| Containerization | Docker, Docker Compose |
+| Language | JavaScript (CommonJS) |
 
 ## Project Structure
 
-```
-payment-system/
-├── api/                      # NestJS API service
-│   ├── src/
-│   │   ├── database/         # PostgreSQL connection
-│   │   ├── rabbitmq/         # Queue producer
-│   │   ├── payments/         # Payment controller & service
-│   │   └── health/           # Health check
-│   ├── Dockerfile
-│   └── package.json
-├── worker/                   # Payment processor
-│   ├── src/
-│   │   ├── index.ts          # Entry point
-│   │   ├── consumer.ts       # Queue consumer
-│   │   ├── processor.ts      # Payment processing logic
-│   │   ├── gateway.ts        # Mock payment gateway
-│   │   ├── database.ts       # PostgreSQL client
-│   │   └── logger.ts         # Pino structured logging
-│   ├── Dockerfile
-│   └── package.json
-├── database/
-│   └── migrations/           # SQL schema
-├── docker-compose.yml
-├── .env
-└── README.md
+- `api/`: The Express HTTP server that handles incoming requests.
+- `worker/`: The background Node.js process that handles BullMQ jobs and talks to the gateway.
+- `database/`: Raw SQL migration files.
+
+## Running Locally
+
+To run the entire stack (PostgreSQL, Redis, API, and Worker):
+
+```bash
+cp .env.example .env
+docker compose up --build
 ```
 
-## Trade-offs
+The database migrations will run automatically on boot.
 
-| Decision | Trade-off |
-|----------|-----------|
-| PostgreSQL as source of truth | Slightly slower than Redis, but guarantees durability |
-| At-least-once delivery | Consumers must be idempotent, but no message loss |
-| SELECT FOR UPDATE | Blocks concurrent access, but prevents double-processing |
-| Exponential backoff | Longer wait times for retries, but prevents thundering herd |
-| Separate API/Worker | More complexity, but allows independent scaling |
+## API
+
+### POST /payments
+Creates a new payment.
+
+**Request:**
+```bash
+curl -X POST http://localhost:3000/payments \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: my-unique-key-123" \
+  -d '{"amount": 1000, "currency": "USD"}'
+```
+
+### GET /payments
+Lists the most recent payments.
+
+**Request:**
+```bash
+curl http://localhost:3000/payments
+```
+
+### GET /health
+Returns the health status of the API.
+
+**Request:**
+```bash
+curl http://localhost:3000/health
+```
+
+## Failure Scenarios Covered
+
+- **Duplicate requests**: Handled natively by PostgreSQL unique constraints.
+- **Redis unavailable**: API ignores the queue failure and leaves the payment in PostgreSQL; reconciliation handles it later.
+- **Gateway temporary failure**: Worker leverages BullMQ exponential backoff for scheduled retries.
+- **Gateway permanent failure**: Worker immediately marks the payment as failed without wasting retry attempts.
+- **Worker restart**: On boot, the worker resets any stuck `PROCESSING` payments back to `CREATED`.
+- **Database-first enqueue pattern**: Prevents phantom jobs by guaranteeing the database commit succeeds before ever touching the queue.
+
+## Future Improvements
+
+- Add Prometheus metrics and OpenTelemetry tracing to monitor queue latency and gateway failure rates.
+- Build a simple frontend dashboard to visualize payment states in real-time.
+- Implement strict rate limiting on the API to prevent abuse.
+- Add authentication (JWT or API Keys) to the endpoints.
+- Implement webhook callbacks to notify clients asynchronously when a payment reaches a terminal state.
+
+## Lessons Learned
+
+Building this taught me why a database-first approach is so much safer than queue-first. If you put a job in a queue before saving it to the database, a sudden crash means you have a ghost job processing a payment that doesn't exist in your system. 
+
+I also realized that treating queues as the source of truth is a trap. BullMQ is fantastic for managing concurrency and exponential backoffs, but it's volatile by nature. Keeping the strict state machine in PostgreSQL makes reasoning about the system much simpler. Switching from RabbitMQ to BullMQ significantly reduced the boilerplate needed for dead-lettering and retries, allowing me to focus more on the actual payment lifecycle.
