@@ -311,29 +311,3 @@ payment-system/
 | SELECT FOR UPDATE | Blocks concurrent access, but prevents double-processing |
 | Exponential backoff | Longer wait times for retries, but prevents thundering herd |
 | Separate API/Worker | More complexity, but allows independent scaling |
-
-## Interview Talking Points
-
-1. **Why not use ON CONFLICT DO UPDATE?**
-   - For payments, we never want to modify on duplicate
-   - Explicit INSERT + SELECT is clearer for auditing
-
-2. **Why publish after commit?**
-   - Prevents phantom jobs if transaction rolls back
-   - If publish fails, retry scanner picks up orphaned payments
-
-3. **Why SELECT FOR UPDATE NOWAIT?**
-   - Prevents deadlocks
-   - Failing fast allows message to be requeued
-
-4. **Why not use Redis as source of truth?**
-   - Redis can lose data on crashes (even with AOF)
-   - PostgreSQL provides ACID guarantees required for payments
-
-5. **How do you handle exactly-once semantics?**
-   - We don't. RabbitMQ provides at-least-once.
-   - Idempotency at the application layer ensures same result.
-
-## License
-
-MIT
