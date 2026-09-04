@@ -17,8 +17,30 @@ I wanted to build a payment backend that behaves more like a real production sys
 
 ## Architecture
 
-Client -> Express API -> PostgreSQL -> BullMQ -> Worker -> Gateway
+```mermaid
+flowchart TD
+    Client["Client / Dashboard"]
+    API["Express API"]
+    DB[("PostgreSQL\n(Source of Truth)")]
+    Queue["BullMQ + Redis\n(Job Scheduling & Retries)"]
+    Worker["Worker\n(Separate Process)"]
+    Gateway["Simulated Payment Gateway"]
 
+    Client -->|Idempotency-Key| API
+    API -->|Persists Payment| DB
+    API -->|Enqueues Job| Queue
+    
+    %% Recovery Path
+    DB -.->|Reconciliation (Recovers stuck payments)| Queue
+    
+    Queue -->|Pulls Job| Worker
+    Worker <-->|Locks Row & Updates State| DB
+    Worker -->|Processes Payment| Gateway
+    
+    %% Retry Path
+    Gateway -.->|Temporary Failure| Worker
+    Worker -.->|Schedules Retry| Queue
+```
 - **Client**: Initiates the payment request with a unique idempotency key.
 - **Express API**: Receives the request, validates it, and inserts it into PostgreSQL. It intentionally avoids calling the payment gateway directly to ensure low latency and high availability.
 - **PostgreSQL**: Acts as the absolute source of truth. It enforces uniqueness to prevent duplicates and provides row-level locks so multiple workers don't process the same payment at the exact same time.
