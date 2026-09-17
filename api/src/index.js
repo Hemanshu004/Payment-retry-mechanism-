@@ -17,6 +17,7 @@ const { initPool, closePool } = require('./db');
 const { initQueue, closeQueue } = require('./queue');
 const healthRoutes = require('./routes/health');
 const paymentRoutes = require('./routes/payments');
+const queueRoutes = require('./routes/queue');
 
 const app = express();
 const PORT = process.env.API_PORT || 3000;
@@ -26,6 +27,7 @@ app.use(express.json());
 
 app.use('/health', healthRoutes);
 app.use('/payments', paymentRoutes);
+app.use('/queue', queueRoutes);
 app.use(express.static(path.join(__dirname, 'public')));
 
 async function main() {
@@ -34,7 +36,7 @@ async function main() {
   await initQueue();
 
   // --- Start listening ---
-  const port = process.env.API_PORT || 3000;
+  const port = process.env.PORT || process.env.API_PORT || 3000;
   const server = app.listen(port, () => {
     console.log(JSON.stringify({
       level: 'info', time: new Date().toISOString(),

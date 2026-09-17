@@ -3,27 +3,37 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Payment Dashboard</title>
+    <title>PayRecover — Payment Retry Dashboard</title>
+    <meta name="description" content="Real-time observability dashboard for distributed payment processing with automatic retry mechanism">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-primary: #0a0a0f;
             --bg-secondary: #12121a;
             --bg-card: #1a1a24;
+            --bg-elevated: #22222e;
             --accent: #6366f1;
             --accent-hover: #818cf8;
+            --accent-dim: rgba(99, 102, 241, 0.15);
             --success: #22c55e;
+            --success-dim: rgba(34, 197, 94, 0.12);
             --warning: #f59e0b;
+            --warning-dim: rgba(245, 158, 11, 0.12);
             --error: #ef4444;
+            --error-dim: rgba(239, 68, 68, 0.12);
+            --purple: #a855f7;
+            --purple-dim: rgba(168, 85, 247, 0.12);
+            --gray: #6b7280;
+            --gray-dim: rgba(107, 114, 128, 0.12);
             --text-primary: #f8fafc;
             --text-secondary: #94a3b8;
+            --text-muted: #64748b;
             --border: #2d2d3a;
+            --border-light: #3d3d4a;
         }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -33,436 +43,1027 @@
             line-height: 1.6;
         }
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
+        .container { max-width: 1280px; margin: 0 auto; padding: 1.5rem 2rem; }
 
-        header {
-            text-align: center;
-            margin-bottom: 3rem;
-        }
+        /* ── Header ─────────────────────────────────────────── */
+        header { text-align: center; margin-bottom: 1.5rem; }
 
         h1 {
-            font-size: 2.5rem;
+            font-size: 2rem;
             background: linear-gradient(135deg, var(--accent), #a855f7);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.25rem;
         }
 
-        header p {
-            color: var(--text-secondary);
+        header p { color: var(--text-secondary); font-size: 0.875rem; }
+
+        /* ── Queue Health ────────────────────────────────────── */
+        .queue-health {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
         }
 
+        .queue-stat {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.6rem 1.2rem;
+            text-align: center;
+            min-width: 100px;
+            transition: border-color 0.3s;
+        }
+
+        .queue-stat:hover { border-color: var(--accent); }
+
+        .queue-stat-label {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-bottom: 0.15rem;
+        }
+
+        .queue-stat-value {
+            font-size: 1.4rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .queue-stat-value.has-items { color: var(--accent); }
+
+        /* ── Grid Layout ────────────────────────────────────── */
         .grid {
             display: grid;
-            grid-template-columns: 1fr 2fr;
-            gap: 2rem;
+            grid-template-columns: 340px 1fr;
+            gap: 1.5rem;
         }
 
-        @media (max-width: 900px) {
-            .grid {
-                grid-template-columns: 1fr;
-            }
-        }
+        @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
 
         .card {
             background: var(--bg-card);
             border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 1.5rem;
+            border-radius: 14px;
+            padding: 1.25rem;
         }
 
         .card h2 {
-            font-size: 1.25rem;
-            margin-bottom: 1.5rem;
+            font-size: 1.1rem;
+            margin-bottom: 1.25rem;
             display: flex;
             align-items: center;
             gap: 0.5rem;
         }
 
-        .form-group {
-            margin-bottom: 1.25rem;
-        }
+        /* ── Form ───────────────────────────────────────────── */
+        .form-group { margin-bottom: 1rem; }
 
         label {
             display: block;
-            font-size: 0.875rem;
+            font-size: 0.8rem;
             color: var(--text-secondary);
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.35rem;
+            font-weight: 500;
         }
 
         input, select {
             width: 100%;
-            padding: 0.75rem 1rem;
+            padding: 0.65rem 0.85rem;
             background: var(--bg-secondary);
             border: 1px solid var(--border);
             border-radius: 8px;
             color: var(--text-primary);
-            font-size: 1rem;
+            font-size: 0.9rem;
+            font-family: inherit;
             transition: border-color 0.2s;
         }
 
-        input:focus, select:focus {
-            outline: none;
-            border-color: var(--accent);
+        input:focus, select:focus { outline: none; border-color: var(--accent); }
+
+        input[readonly] {
+            color: var(--text-secondary);
+            cursor: default;
+        }
+
+        .demo-select {
+            border-color: var(--purple);
+            background: var(--purple-dim);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
         }
 
         button {
             width: 100%;
-            padding: 0.875rem;
+            padding: 0.75rem;
             background: linear-gradient(135deg, var(--accent), #7c3aed);
             border: none;
             border-radius: 8px;
             color: white;
-            font-size: 1rem;
+            font-size: 0.9rem;
             font-weight: 600;
             cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
+            font-family: inherit;
+            transition: transform 0.15s, box-shadow 0.15s;
         }
 
         button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(99, 102, 241, 0.3);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(99, 102, 241, 0.3);
         }
 
-        button:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }
+        button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
 
+        /* ── Status Bar ─────────────────────────────────────── */
         .status-bar {
             display: flex;
-            gap: 1rem;
-            margin-bottom: 1.5rem;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
             flex-wrap: wrap;
         }
 
         .status-item {
             background: var(--bg-secondary);
-            padding: 0.75rem 1rem;
+            padding: 0.5rem 0.75rem;
             border-radius: 8px;
-            font-size: 0.875rem;
+            font-size: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
         }
 
-        .status-item span {
-            font-weight: 700;
-            font-size: 1.25rem;
-        }
+        .status-item span { font-weight: 700; font-size: 1.1rem; }
 
-        .payment-list {
-            max-height: 600px;
-            overflow-y: auto;
-        }
-
-        .payment-item {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 1rem;
-            margin-bottom: 0.75rem;
-            transition: border-color 0.2s;
-        }
-
-        .payment-item:hover {
-            border-color: var(--accent);
-        }
-
-        .payment-header {
+        /* ── Payment List ───────────────────────────────────── */
+        .header-actions {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 0.75rem;
-        }
-
-        .payment-id {
-            font-family: monospace;
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-        }
-
-        .payment-amount {
-            font-size: 1.25rem;
-            font-weight: 700;
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 0.25rem 0.75rem;
-            border-radius: 9999px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .badge-created { background: #3b82f6; }
-        .badge-processing { background: #f59e0b; animation: pulse 1.5s infinite; }
-        .badge-success { background: #22c55e; }
-        .badge-failed { background: #ef4444; }
-        .badge-retry_scheduled { background: #8b5cf6; }
-        .badge-dead_lettered { background: #6b7280; }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
-        }
-
-        .payment-meta {
-            display: flex;
-            gap: 1rem;
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-        }
-
-        .toast {
-            position: fixed;
-            bottom: 2rem;
-            right: 2rem;
-            padding: 1rem 1.5rem;
-            border-radius: 12px;
-            color: white;
-            font-weight: 500;
-            transform: translateY(100px);
-            opacity: 0;
-            transition: all 0.3s;
-            z-index: 1000;
-        }
-
-        .toast.show {
-            transform: translateY(0);
-            opacity: 1;
-        }
-
-        .toast-success { background: var(--success); }
-        .toast-error { background: var(--error); }
-
-        .empty-state {
-            text-align: center;
-            padding: 3rem;
-            color: var(--text-secondary);
         }
 
         .refresh-btn {
             background: transparent;
             border: 1px solid var(--border);
-            padding: 0.5rem 1rem;
+            padding: 0.4rem 0.8rem;
             width: auto;
-            font-size: 0.875rem;
+            font-size: 0.8rem;
+            border-radius: 6px;
         }
 
-        .header-actions {
+        .payment-list { max-height: 650px; overflow-y: auto; }
+
+        .payment-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.85rem 1rem;
+            margin-bottom: 0.6rem;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+        }
+
+        .payment-item:hover {
+            border-color: var(--accent);
+            background: var(--bg-elevated);
+        }
+
+        .payment-item.status-changed {
+            animation: statusPulse 1s ease-out;
+        }
+
+        @keyframes statusPulse {
+            0% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
+            70% { box-shadow: 0 0 0 8px rgba(99, 102, 241, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+        }
+
+        .payment-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.5rem;
+        }
+
+        .payment-id {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        .payment-amount { font-size: 1.15rem; font-weight: 700; }
+
+        /* ── Badges ─────────────────────────────────────────── */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .badge-created { background: rgba(59,130,246,0.2); color: #60a5fa; }
+        .badge-processing { background: var(--warning-dim); color: var(--warning); animation: pulse 1.5s infinite; }
+        .badge-success { background: var(--success-dim); color: var(--success); }
+        .badge-failed { background: var(--error-dim); color: var(--error); }
+        .badge-retry_scheduled { background: var(--purple-dim); color: var(--purple); }
+        .badge-dead_lettered { background: var(--gray-dim); color: var(--gray); }
+
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        /* ── Payment Meta (retry info) ──────────────────────── */
+        .payment-meta {
+            display: flex;
+            gap: 0.75rem;
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            flex-wrap: wrap;
+        }
+
+        .payment-retry-info {
+            margin-top: 0.4rem;
+            padding: 0.4rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.7rem;
+        }
+
+        .retry-info-active {
+            background: var(--purple-dim);
+            border: 1px solid rgba(168, 85, 247, 0.2);
+            color: var(--purple);
+        }
+
+        .retry-info-recovered {
+            background: var(--success-dim);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            color: var(--success);
+        }
+
+        .retry-info-failed {
+            background: var(--error-dim);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            color: var(--error);
+        }
+
+        .idempotent-badge {
+            background: var(--warning-dim);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            color: var(--warning);
+            padding: 0.2rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        /* ── Detail Modal ───────────────────────────────────── */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 100;
+            display: none;
+            justify-content: flex-end;
+            backdrop-filter: blur(4px);
+        }
+
+        .modal-overlay.open { display: flex; }
+
+        .modal-panel {
+            width: 480px;
+            max-width: 90vw;
+            background: var(--bg-card);
+            border-left: 1px solid var(--border);
+            height: 100vh;
+            overflow-y: auto;
+            padding: 1.5rem;
+            animation: slideIn 0.25s ease-out;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
+        }
+
+        .modal-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 1rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .modal-header h2 { margin-bottom: 0; font-size: 1.1rem; }
+
+        .modal-close {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .detail-item {
+            background: var(--bg-secondary);
+            padding: 0.6rem 0.75rem;
+            border-radius: 8px;
+        }
+
+        .detail-item.full-width { grid-column: 1 / -1; }
+
+        .detail-label {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-bottom: 0.15rem;
+        }
+
+        .detail-value {
+            font-size: 0.85rem;
+            font-weight: 600;
+            word-break: break-all;
+        }
+
+        .detail-value.mono {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+        }
+
+        /* ── Recovery / Failure Banners ─────────────────────── */
+        .status-banner {
+            padding: 0.75rem 1rem;
+            border-radius: 10px;
+            margin-bottom: 1.25rem;
+            font-size: 0.85rem;
+        }
+
+        .banner-recovered {
+            background: var(--success-dim);
+            border: 1px solid rgba(34, 197, 94, 0.25);
+        }
+
+        .banner-recovered .banner-title { color: var(--success); font-weight: 700; font-size: 0.95rem; }
+        .banner-recovered .banner-desc { color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.25rem; }
+
+        .banner-failed {
+            background: var(--error-dim);
+            border: 1px solid rgba(239, 68, 68, 0.25);
+        }
+
+        .banner-failed .banner-title { color: var(--error); font-weight: 700; font-size: 0.95rem; }
+        .banner-failed .banner-desc { color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.25rem; }
+
+        /* ── Attempt Timeline ───────────────────────────────── */
+        .timeline-header {
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+            color: var(--text-primary);
+        }
+
+        .timeline { position: relative; padding-left: 1.5rem; }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 0.45rem;
+            top: 0.5rem;
+            bottom: 0.5rem;
+            width: 2px;
+            background: var(--border);
+        }
+
+        .timeline-item {
+            position: relative;
+            padding-bottom: 1rem;
+        }
+
+        .timeline-item:last-child { padding-bottom: 0; }
+
+        .timeline-dot {
+            position: absolute;
+            left: -1.2rem;
+            top: 0.2rem;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.55rem;
+            font-weight: 700;
+            color: white;
+        }
+
+        .dot-success { background: var(--success); }
+        .dot-error { background: var(--error); }
+        .dot-pending { background: var(--gray); border: 2px solid var(--border-light); }
+
+        .timeline-content {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 0.6rem 0.75rem;
+        }
+
+        .timeline-attempt {
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-bottom: 0.2rem;
+        }
+
+        .timeline-status {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+        }
+
+        .timeline-error {
+            font-size: 0.7rem;
+            color: var(--error);
+            margin-top: 0.15rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .timeline-success-msg {
+            font-size: 0.7rem;
+            color: var(--success);
+            margin-top: 0.15rem;
+        }
+
+        .timeline-time {
+            font-size: 0.6rem;
+            color: var(--text-muted);
+            margin-top: 0.2rem;
+        }
+
+        /* ── Toast ──────────────────────────────────────────── */
+        .toast {
+            position: fixed;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            padding: 0.75rem 1.25rem;
+            border-radius: 10px;
+            color: white;
+            font-weight: 500;
+            font-size: 0.85rem;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s;
+            z-index: 1000;
+            max-width: 400px;
+        }
+
+        .toast.show { transform: translateY(0); opacity: 1; }
+        .toast-success { background: var(--success); }
+        .toast-error { background: var(--error); }
+        .toast-info { background: var(--accent); }
+        .toast-warning { background: var(--warning); color: #1a1a24; }
+
+        .empty-state {
+            text-align: center;
+            padding: 2.5rem;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* ── Polling indicator ──────────────────────────────── */
+        .poll-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        .poll-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pollBlink 2s infinite;
+        }
+
+        @keyframes pollBlink {
+            0%, 90%, 100% { opacity: 0.3; }
+            95% { opacity: 1; }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>💳 Payment Dashboard</h1>
-            <p>Distributed Payment Processing System</p>
+            <h1>⚡ PayRecover</h1>
+            <p>Distributed Payment Processing with Automatic Retry</p>
         </header>
 
+        <!-- Queue Health -->
+        <div class="queue-health" id="queueHealth">
+            <div class="queue-stat">
+                <div class="queue-stat-label">Waiting</div>
+                <div class="queue-stat-value" id="qWaiting">–</div>
+            </div>
+            <div class="queue-stat">
+                <div class="queue-stat-label">Active</div>
+                <div class="queue-stat-value" id="qActive">–</div>
+            </div>
+            <div class="queue-stat">
+                <div class="queue-stat-label">Delayed</div>
+                <div class="queue-stat-value" id="qDelayed">–</div>
+            </div>
+            <div class="queue-stat">
+                <div class="queue-stat-label">Failed</div>
+                <div class="queue-stat-value" id="qFailed">–</div>
+            </div>
+            <div class="queue-stat">
+                <div class="queue-stat-label" style="font-size: 0.55rem;">Completed Payments</div>
+                <div class="queue-stat-value" id="qCompleted_payments">–</div>
+            </div>
+        </div>
+
+        <!-- Main Grid -->
         <div class="grid">
-            <div class="card">
-                <h2>➕ Create Payment</h2>
-                <form id="paymentForm">
-                    <div class="form-group">
-                        <label for="idempotencyKey">Idempotency Key</label>
-                        <input type="text" id="idempotencyKey" placeholder="e.g., order-12345" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="amount">Amount (cents)</label>
-                        <input type="number" id="amount" placeholder="1000" min="1" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="currency">Currency</label>
-                        <select id="currency">
-                            <option value="USD">USD - US Dollar</option>
-                            <option value="EUR">EUR - Euro</option>
-                            <option value="GBP">GBP - British Pound</option>
-                            <option value="INR">INR - Indian Rupee</option>
-                        </select>
-                    </div>
-                    <button type="submit" id="submitBtn">Create Payment</button>
-                </form>
+            <!-- Left Column: Create Payment -->
+            <div>
+                <div class="card">
+                    <h2>➕ Create Payment</h2>
+                    <form id="paymentForm">
+                        <div class="form-group">
+                            <label for="demoMode">Demo Failure Mode</label>
+                            <select id="demoMode" class="demo-select">
+                                <option value="">Normal (random gateway)</option>
+                                <option value="101">Always Success</option>
+                                <option value="201">Fail Once → Success</option>
+                                <option value="202" selected>Fail Twice → Success</option>
+                                <option value="203">Always Fail (retryable)</option>
+                                <option value="103">Permanent Failure</option>
+                                <option value="204">Timeout → Success</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="idempotencyKey">Idempotency Key</label>
+                            <input type="text" id="idempotencyKey" placeholder="e.g., order-12345" required>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="amount">Amount (cents)</label>
+                                <input type="number" id="amount" placeholder="1000" min="1" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="currency">Currency</label>
+                                <select id="currency">
+                                    <option value="USD">USD</option>
+                                    <option value="EUR">EUR</option>
+                                    <option value="GBP">GBP</option>
+                                    <option value="INR">INR</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="submit" id="submitBtn">Create Payment</button>
+                    </form>
+                </div>
             </div>
 
+            <!-- Right Column: Payment List -->
             <div class="card">
                 <div class="header-actions">
                     <h2>📋 Payments</h2>
-                    <button class="refresh-btn" onclick="loadPayments()">🔄 Refresh</button>
+                    <div style="display:flex; align-items:center; gap:0.75rem;">
+                        <div class="poll-indicator"><div class="poll-dot"></div> Live</div>
+                        <button class="refresh-btn" onclick="loadPayments()">↻ Refresh</button>
+                    </div>
                 </div>
 
                 <div class="status-bar">
                     <div class="status-item">Total: <span id="totalCount">0</span></div>
-                    <div class="status-item">✅ Success: <span id="successCount">0</span></div>
-                    <div class="status-item">⏳ Pending: <span id="pendingCount">0</span></div>
-                    <div class="status-item">❌ Failed: <span id="failedCount">0</span></div>
+                    <div class="status-item">✅ <span id="successCount">0</span></div>
+                    <div class="status-item">⏳ <span id="pendingCount">0</span></div>
+                    <div class="status-item">❌ <span id="failedCount">0</span></div>
                 </div>
 
                 <div class="payment-list" id="paymentList">
-                    <div class="empty-state">No payments yet. Create one!</div>
+                    <div class="empty-state">No payments yet. Create one to start the demo!</div>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- Detail Modal -->
+    <div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+        <div class="modal-panel" id="modalPanel" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2>📄 Payment Details</h2>
+                <button class="modal-close" onclick="closeDetail()">✕</button>
+            </div>
+            <div id="modalContent">Loading...</div>
+        </div>
+    </div>
+
+    <!-- Toast -->
     <div id="toast" class="toast"></div>
 
     <script>
         const API_URL = '';
 
-        // Generate unique idempotency key
-        document.getElementById('idempotencyKey').value = 'pay-' + Date.now();
+        // ── State ──────────────────────────────────────────────────────────
+        let previousStatuses = {};  // paymentId → last known status
+        let activePaymentId = null; // currently viewing in modal
+        let pollingInterval = null;
 
-        // Toast notification
+        // ── Init ───────────────────────────────────────────────────────────
+        document.getElementById('idempotencyKey').value = 'pay-' + Date.now();
+        handleDemoModeChange(); // set initial amount
+
+        // ── Toast ──────────────────────────────────────────────────────────
         function showToast(message, type = 'success') {
             const toast = document.getElementById('toast');
             toast.textContent = message;
             toast.className = `toast toast-${type} show`;
-            setTimeout(() => toast.classList.remove('show'), 3000);
+            setTimeout(() => toast.classList.remove('show'), 3500);
         }
 
-        // Format currency
+        // ── Formatters ─────────────────────────────────────────────────────
+        const currencySymbols = { USD: '$', EUR: '€', GBP: '£', INR: '₹' };
+
         function formatAmount(amount, currency) {
-            const symbols = { USD: '$', EUR: '€', GBP: '£', INR: '₹' };
-            return `${symbols[currency] || ''}${(amount / 100).toFixed(2)}`;
+            // Demo mode amounts are magic values; display as $10.00 equivalent
+            const demoAmounts = [101, 102, 103, 201, 202, 203, 204];
+            if (demoAmounts.includes(amount)) {
+                return `${currencySymbols[currency] || ''}${(amount / 100).toFixed(2)}`;
+            }
+            return `${currencySymbols[currency] || ''}${(amount / 100).toFixed(2)}`;
         }
 
-        // Format date
         function formatDate(dateStr) {
+            if (!dateStr) return '–';
             return new Date(dateStr).toLocaleString();
         }
 
-        // Load payments from database
+        function formatTime(dateStr) {
+            if (!dateStr) return '';
+            return new Date(dateStr).toLocaleTimeString();
+        }
+
+        function statusIcon(status) {
+            switch(status) {
+                case 'CREATED': return '○';
+                case 'PROCESSING': return '◉';
+                case 'SUCCESS': return '✓';
+                case 'FAILED': return '✕';
+                case 'RETRY_SCHEDULED': return '↻';
+                case 'DEAD_LETTERED': return '⊘';
+                default: return '?';
+            }
+        }
+
+        // ── Demo Mode Handler ──────────────────────────────────────────────
+        function handleDemoModeChange() {
+            const mode = document.getElementById('demoMode').value;
+            const amountInput = document.getElementById('amount');
+
+            if (mode) {
+                amountInput.value = mode;
+                amountInput.readOnly = true;
+            } else {
+                amountInput.value = '';
+                amountInput.readOnly = false;
+            }
+        }
+
+        document.getElementById('demoMode').addEventListener('change', handleDemoModeChange);
+
+        // ── Queue Health ───────────────────────────────────────────────────
+        async function loadQueueStats() {
+            try {
+                const res = await fetch(`${API_URL}/queue/stats`);
+                if (!res.ok) return;
+                const data = await res.json();
+
+                const fields = ['Waiting', 'Active', 'Delayed', 'Failed', 'Completed_payments'];
+                fields.forEach(f => {
+                    const el = document.getElementById('q' + f);
+                    const val = data[f.toLowerCase()] || 0;
+                    el.textContent = val;
+                    el.className = 'queue-stat-value' + (val > 0 ? ' has-items' : '');
+                });
+            } catch (e) {
+                // Silently ignore — queue stats are non-critical
+            }
+        }
+
+        // ── Payment List ───────────────────────────────────────────────────
         async function loadPayments() {
             try {
-                const response = await fetch(`${API_URL}/payments`);
-                if (!response.ok) throw new Error('Failed to load');
-                
-                const data = await response.json();
+                const res = await fetch(`${API_URL}/payments`);
+                if (!res.ok) throw new Error('Failed to load');
+                const data = await res.json();
                 renderPayments(data.payments || []);
-            } catch (error) {
+            } catch (e) {
                 console.log('Could not load payments list');
             }
         }
 
-        // Render payment list
         function renderPayments(payments) {
             const list = document.getElementById('paymentList');
-            
+
             if (payments.length === 0) {
-                list.innerHTML = '<div class="empty-state">No payments yet. Create one!</div>';
+                list.innerHTML = '<div class="empty-state">No payments yet. Create one to start the demo!</div>';
+                updateCounts(payments);
                 return;
             }
 
-            // Update stats
+            updateCounts(payments);
+
+            list.innerHTML = payments.map(p => {
+                const statusChanged = previousStatuses[p.id] && previousStatuses[p.id] !== p.status;
+                const changedClass = statusChanged ? ' status-changed' : '';
+                previousStatuses[p.id] = p.status;
+
+                let retryHtml = '';
+                if (p.status === 'SUCCESS' && p.retry_count > 0) {
+                    retryHtml = `<div class="payment-retry-info retry-info-recovered">✓ Recovered — Attempt ${p.retry_count + 1} / ${p.max_retries}${p.provider_transaction_id ? ' — ' + p.provider_transaction_id : ''}</div>`;
+                } else if (p.status === 'RETRY_SCHEDULED') {
+                    retryHtml = `<div class="payment-retry-info retry-info-active">↻ Retry ${p.retry_count} / ${p.max_retries} — ${p.failure_reason || 'Temporary failure'}</div>`;
+                } else if (p.status === 'FAILED' || p.status === 'DEAD_LETTERED') {
+                    retryHtml = `<div class="payment-retry-info retry-info-failed">✕ ${p.status === 'DEAD_LETTERED' ? 'Attempts exhausted' : 'Permanent failure'} — ${p.failure_reason || 'Unknown error'}</div>`;
+                }
+
+                return `
+                    <div class="payment-item${changedClass}" onclick="showPaymentDetails('${p.id}')">
+                        <div class="payment-header">
+                            <div>
+                                <div class="payment-amount">${formatAmount(p.amount, p.currency)}</div>
+                                <div class="payment-id">${p.id}</div>
+                            </div>
+                            <span class="badge badge-${p.status.toLowerCase()}">${statusIcon(p.status)} ${p.status.replace('_', ' ')}</span>
+                        </div>
+                        <div class="payment-meta">
+                            <span>🔑 ${p.idempotency_key}</span>
+                            <span>↻ ${p.retry_count}/${p.max_retries}</span>
+                            <span>📅 ${formatTime(p.created_at)}</span>
+                        </div>
+                        ${retryHtml}
+                    </div>`;
+            }).join('');
+        }
+
+        function updateCounts(payments) {
             document.getElementById('totalCount').textContent = payments.length;
             document.getElementById('successCount').textContent = payments.filter(p => p.status === 'SUCCESS').length;
             document.getElementById('pendingCount').textContent = payments.filter(p => ['CREATED', 'PROCESSING', 'RETRY_SCHEDULED'].includes(p.status)).length;
             document.getElementById('failedCount').textContent = payments.filter(p => ['FAILED', 'DEAD_LETTERED'].includes(p.status)).length;
-
-            list.innerHTML = payments.map(p => `
-                <div class="payment-item">
-                    <div class="payment-header">
-                        <div>
-                            <div class="payment-amount">${formatAmount(p.amount, p.currency)}</div>
-                            <div class="payment-id">${p.id}</div>
-                        </div>
-                        <span class="badge badge-${p.status.toLowerCase()}">${p.status}</span>
-                    </div>
-                    <div class="payment-meta">
-                        <span>🔑 ${p.idempotency_key}</span>
-                        <span>🔄 Retries: ${p.retry_count}/${p.max_retries}</span>
-                        <span>📅 ${formatDate(p.created_at)}</span>
-                    </div>
-                    ${p.failure_reason ? `<div class="payment-meta" style="color: var(--error);">⚠️ ${p.failure_reason}</div>` : ''}
-                </div>
-            `).join('');
         }
 
-        // Add payment to list (for immediate feedback)
-        function addPaymentToList(payment, created) {
-            const list = document.getElementById('paymentList');
-            const emptyState = list.querySelector('.empty-state');
-            if (emptyState) emptyState.remove();
+        // ── Payment Detail Modal ───────────────────────────────────────────
+        async function showPaymentDetails(paymentId) {
+            activePaymentId = paymentId;
+            document.getElementById('modalOverlay').classList.add('open');
+            document.getElementById('modalContent').innerHTML = '<div class="empty-state">Loading...</div>';
+            await refreshPaymentDetail();
+        }
 
-            const item = document.createElement('div');
-            item.className = 'payment-item';
-            item.style.borderColor = created ? 'var(--accent)' : 'var(--warning)';
-            item.innerHTML = `
-                <div class="payment-header">
-                    <div>
-                        <div class="payment-amount">${formatAmount(payment.amount, payment.currency)}</div>
-                        <div class="payment-id">${payment.id}</div>
+        async function refreshPaymentDetail() {
+            if (!activePaymentId) return;
+            try {
+                const res = await fetch(`${API_URL}/payments/${activePaymentId}`);
+                if (!res.ok) throw new Error('Not found');
+                const data = await res.json();
+                renderPaymentDetail(data.payment, data.attempts);
+            } catch (e) {
+                document.getElementById('modalContent').innerHTML = '<div class="empty-state">Failed to load payment details.</div>';
+            }
+        }
+
+        function renderPaymentDetail(payment, attempts) {
+            let bannerHtml = '';
+
+            // Recovery banner
+            if (payment.status === 'SUCCESS' && payment.retry_count > 0) {
+                bannerHtml = `
+                    <div class="status-banner banner-recovered">
+                        <div class="banner-title">✓ PAYMENT RECOVERED</div>
+                        <div class="banner-desc">
+                            Attempt ${payment.retry_count + 1} / ${payment.max_retries} — The payment initially failed but was successfully recovered by the retry mechanism.
+                        </div>
+                        ${payment.provider_transaction_id ? `<div class="banner-desc" style="margin-top:0.3rem;"><strong>Provider Transaction ID:</strong> ${payment.provider_transaction_id}</div>` : ''}
+                    </div>`;
+            }
+
+            // Failure banner
+            if (payment.status === 'FAILED' || payment.status === 'DEAD_LETTERED') {
+                bannerHtml = `
+                    <div class="status-banner banner-failed">
+                        <div class="banner-title">✕ PAYMENT ${payment.status === 'DEAD_LETTERED' ? 'DEAD LETTERED' : 'FAILED'}</div>
+                        <div class="banner-desc">
+                            ${payment.status === 'DEAD_LETTERED' ? `All ${payment.max_retries} retry attempts exhausted.` : 'Permanent gateway failure — no further retries.'}
+                        </div>
+                        ${payment.failure_reason ? `<div class="banner-desc" style="margin-top:0.3rem;"><strong>Last Error:</strong> ${payment.failure_reason}</div>` : ''}
+                    </div>`;
+            }
+
+            // Detail grid
+            const detailHtml = `
+                ${bannerHtml}
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <div class="detail-label">Status</div>
+                        <div class="detail-value"><span class="badge badge-${payment.status.toLowerCase()}">${statusIcon(payment.status)} ${payment.status.replace('_', ' ')}</span></div>
                     </div>
-                    <span class="badge badge-${payment.status.toLowerCase()}">${payment.status}</span>
-                </div>
-                <div class="payment-meta">
-                    <span>🔑 ${payment.idempotency_key}</span>
-                    <span>🔄 Retries: ${payment.retry_count}/${payment.max_retries}</span>
-                    <span>📅 ${formatDate(payment.created_at)}</span>
+                    <div class="detail-item">
+                        <div class="detail-label">Amount</div>
+                        <div class="detail-value">${formatAmount(payment.amount, payment.currency)} ${payment.currency}</div>
+                    </div>
+                    <div class="detail-item full-width">
+                        <div class="detail-label">Payment ID</div>
+                        <div class="detail-value mono">${payment.id}</div>
+                    </div>
+                    <div class="detail-item full-width">
+                        <div class="detail-label">Idempotency Key</div>
+                        <div class="detail-value mono">${payment.idempotency_key}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Attempts</div>
+                        <div class="detail-value">${payment.retry_count + (payment.status === 'SUCCESS' || payment.status === 'FAILED' ? 1 : 0)} / ${payment.max_retries}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Retry Count</div>
+                        <div class="detail-value">${payment.retry_count}</div>
+                    </div>
+                    ${payment.provider_transaction_id ? `
+                    <div class="detail-item full-width">
+                        <div class="detail-label">Provider Transaction ID</div>
+                        <div class="detail-value mono" style="color:var(--success)">${payment.provider_transaction_id}</div>
+                    </div>` : ''}
+                    ${payment.failure_reason ? `
+                    <div class="detail-item full-width">
+                        <div class="detail-label">Last Error</div>
+                        <div class="detail-value" style="color:var(--error)">${payment.failure_reason}</div>
+                    </div>` : ''}
+                    <div class="detail-item">
+                        <div class="detail-label">Created At</div>
+                        <div class="detail-value" style="font-size:0.75rem">${formatDate(payment.created_at)}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Updated At</div>
+                        <div class="detail-value" style="font-size:0.75rem">${formatDate(payment.updated_at)}</div>
+                    </div>
                 </div>
             `;
-            list.insertBefore(item, list.firstChild);
 
-            // Update total count
-            const total = document.getElementById('totalCount');
-            total.textContent = parseInt(total.textContent || 0) + (created ? 1 : 0);
+            // Attempt timeline
+            let timelineHtml = '';
+            if (attempts && attempts.length > 0) {
+                timelineHtml = `
+                    <div class="timeline-header">Attempt Timeline</div>
+                    <div class="timeline">
+                        ${attempts.map(a => {
+                            const isSuccess = a.status === 'SUCCESS';
+                            const dotClass = isSuccess ? 'dot-success' : 'dot-error';
+                            const dotSymbol = isSuccess ? '✓' : '✕';
+                            return `
+                                <div class="timeline-item">
+                                    <div class="timeline-dot ${dotClass}">${dotSymbol}</div>
+                                    <div class="timeline-content">
+                                        <div class="timeline-attempt">Attempt ${a.attempt_number}</div>
+                                        <div class="timeline-status">${a.status.replace('_', ' ')}</div>
+                                        ${a.error_message ? `<div class="timeline-error">${a.error_message}</div>` : ''}
+                                        ${isSuccess ? `<div class="timeline-success-msg">${a.gateway_response}</div>` : ''}
+                                        <div class="timeline-time">${formatDate(a.created_at)}</div>
+                                    </div>
+                                </div>`;
+                        }).join('')}
+                        ${['CREATED', 'PROCESSING', 'RETRY_SCHEDULED'].includes(payment.status) ? `
+                            <div class="timeline-item">
+                                <div class="timeline-dot dot-pending">⏳</div>
+                                <div class="timeline-content">
+                                    <div class="timeline-attempt">Attempt ${attempts.length + 1}</div>
+                                    <div class="timeline-status" style="color:var(--text-muted)">${payment.status === 'RETRY_SCHEDULED' ? 'Waiting for retry...' : payment.status === 'PROCESSING' ? 'Processing...' : 'Queued...'}</div>
+                                </div>
+                            </div>` : ''}
+                    </div>`;
+            } else if (['CREATED', 'PROCESSING'].includes(payment.status)) {
+                timelineHtml = `
+                    <div class="timeline-header">Attempt Timeline</div>
+                    <div class="timeline">
+                        <div class="timeline-item">
+                            <div class="timeline-dot dot-pending">⏳</div>
+                            <div class="timeline-content">
+                                <div class="timeline-attempt">Attempt 1</div>
+                                <div class="timeline-status" style="color:var(--text-muted)">${payment.status === 'PROCESSING' ? 'Processing...' : 'Queued...'}</div>
+                            </div>
+                        </div>
+                    </div>`;
+            }
+
+            document.getElementById('modalContent').innerHTML = detailHtml + timelineHtml;
         }
 
-        // Handle form submit
+        function closeModal(event) {
+            if (event.target === document.getElementById('modalOverlay')) {
+                closeDetail();
+            }
+        }
+
+        function closeDetail() {
+            document.getElementById('modalOverlay').classList.remove('open');
+            activePaymentId = null;
+        }
+
+        // ── Create Payment ─────────────────────────────────────────────────
         document.getElementById('paymentForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const btn = document.getElementById('submitBtn');
             btn.disabled = true;
-            btn.textContent = 'Processing...';
+            btn.textContent = 'Creating...';
 
             const idempotencyKey = document.getElementById('idempotencyKey').value;
             const amount = parseInt(document.getElementById('amount').value);
             const currency = document.getElementById('currency').value;
 
             try {
-                const response = await fetch(`${API_URL}/payments`, {
+                const res = await fetch(`${API_URL}/payments`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Idempotency-Key': idempotencyKey
+                        'Idempotency-Key': idempotencyKey,
                     },
-                    body: JSON.stringify({ amount, currency })
+                    body: JSON.stringify({ amount, currency }),
                 });
 
-                const data = await response.json();
+                const data = await res.json();
 
-                if (response.ok) {
-                    addPaymentToList(data.payment, data.created);
-                    showToast(data.created ? 'Payment created!' : 'Payment already exists (idempotent)', 'success');
-                    
-                    // Reset form with new key
+                if (res.ok) {
+                    if (data.created) {
+                        showToast('Payment created — watching lifecycle...', 'success');
+                    } else {
+                        showToast('⚡ Idempotent — existing payment returned (no duplicate)', 'warning');
+                    }
+
+                    // Immediately load to show the new payment
+                    await loadPayments();
+                    await loadQueueStats();
+
+                    // Reset form
                     document.getElementById('idempotencyKey').value = 'pay-' + Date.now();
-                    document.getElementById('amount').value = '';
+                    if (!document.getElementById('demoMode').value) {
+                        document.getElementById('amount').value = '';
+                    }
                 } else {
-                    showToast(data.message || 'Failed to create payment', 'error');
+                    showToast(data.error || 'Failed to create payment', 'error');
                 }
-            } catch (error) {
-                showToast('Network error: ' + error.message, 'error');
+            } catch (err) {
+                showToast('Network error: ' + err.message, 'error');
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Create Payment';
             }
         });
 
-        // Auto-refresh every 5 seconds
-        setInterval(loadPayments, 5000);
+        // ── Polling ────────────────────────────────────────────────────────
+        function startPolling() {
+            pollingInterval = setInterval(async () => {
+                await loadPayments();
+                await loadQueueStats();
+                // Also refresh detail modal if open
+                if (activePaymentId) {
+                    await refreshPaymentDetail();
+                }
+            }, 2000);
+        }
+
+        // ── Keyboard shortcuts ─────────────────────────────────────────────
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeDetail();
+        });
+
+        // ── Start ──────────────────────────────────────────────────────────
         loadPayments();
+        loadQueueStats();
+        startPolling();
     </script>
 </body>
 </html>

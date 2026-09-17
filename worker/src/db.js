@@ -25,6 +25,8 @@ async function initDatabase() {
     max: 10,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,
+    // Enable SSL for managed databases (e.g., Neon URLs include sslmode=require)
+    ssl: connectionString.includes('sslmode=require') ? { rejectUnauthorized: false } : false,
   });
 
   // Verify connectivity
@@ -175,6 +177,39 @@ async function markPaymentDeadLettered(paymentId, reason) {
   return result.rows[0] || null;
 }
 
+/**
+ * Log a payment processing attempt to the payment_attempts table.
+ *
+ * @param {import('pg').PoolClient} client — must be inside a transaction
+ * @param {string} paymentId
+ * @param {number} attemptNumber — 1-indexed
+ * @param {string} status — 'SUCCESS', 'RETRYABLE_ERROR', or 'FATAL_ERROR'
+ * @param {string|null} gatewayResponse — raw gateway response message
+ * @param {string|null} errorMessage — error description if failed
+ */
+async function insertPaymentAttempt(client, paymentId, attemptNumber, status, gatewayResponse, errorMessage) {
+  await client.query(
+    `INSERT INTO payment_attempts (payment_id, attempt_number, status, gateway_response, error_message)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (payment_id, attempt_number) DO NOTHING`,
+    [paymentId, attemptNumber, status, gatewayResponse, errorMessage]
+  );
+}
+
+/**
+ * Save the provider transaction ID after a successful gateway call.
+ *
+ * @param {import('pg').PoolClient} client — must be inside a transaction
+ * @param {string} paymentId
+ * @param {string} transactionId — from the gateway response
+ */
+async function updateProviderTransactionId(client, paymentId, transactionId) {
+  await client.query(
+    `UPDATE payments SET provider_transaction_id = $2, updated_at = NOW() WHERE id = $1`,
+    [paymentId, transactionId]
+  );
+}
+
 module.exports = {
   initDatabase,
   closeDatabase,
@@ -186,4 +221,6 @@ module.exports = {
   findStuckPayments,
   resetStuckPayment,
   markPaymentDeadLettered,
+  insertPaymentAttempt,
+  updateProviderTransactionId,
 };

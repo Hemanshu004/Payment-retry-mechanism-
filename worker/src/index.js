@@ -17,6 +17,9 @@ const { log } = require('./logger');
 const { initDatabase, closeDatabase, getClient, findStuckPayments, resetStuckPayment } = require('./db');
 const { startWorker, stopWorker } = require('./queue');
 const { startReconciliation, stopReconciliation } = require('./reconciliation');
+const http = require('http');
+
+let healthServer = null;
 
 // ─── Stuck-payment recovery ──────────────────────────────────────────────────
 
@@ -88,6 +91,26 @@ async function main() {
   await startReconciliation();
 
   log.info('Worker service started successfully');
+
+  // Minimal HTTP health endpoint — required for Render free-tier Web Service
+  const healthPort = process.env.PORT || 4000;
+  healthServer = http.createServer((req, res) => {
+    if (req.method === 'GET' && (req.url === '/health' || req.url === '/')) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        status: 'ok',
+        service: 'payment-worker',
+        timestamp: new Date().toISOString(),
+      }));
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+
+  healthServer.listen(healthPort, () => {
+    log.info(`Worker health endpoint listening on port ${healthPort}`);
+  });
 }
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
@@ -99,6 +122,7 @@ async function shutdown(signal) {
     stopReconciliation();
     await stopWorker();
     await closeDatabase();
+    if (healthServer) healthServer.close();
     log.info('Graceful shutdown complete');
     process.exit(0);
   } catch (err) {

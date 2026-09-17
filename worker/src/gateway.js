@@ -59,14 +59,21 @@ function generateTransactionId() {
  * If amount == 102, always RETRYABLE_ERROR (temporary)
  * If amount == 103, always FATAL_ERROR (permanent)
  *
+ * DEMO FAILURE MODES (uses persisted retry_count from PostgreSQL):
+ * If amount == 201, fail once (RETRYABLE_ERROR), then succeed on retry_count >= 1
+ * If amount == 202, fail twice, then succeed on retry_count >= 2
+ * If amount == 203, always RETRYABLE_ERROR (will eventually DEAD_LETTER)
+ * If amount == 204, timeout on first attempt, then succeed on retry_count >= 1
+ *
  * @param {string} paymentId — UUID (for logging)
  * @param {number} amount    — amount in smallest currency unit
  * @param {string} currency  — ISO 4217 code
+ * @param {number} retryCount — current retry_count from PostgreSQL (0 on first attempt)
  * @returns {Promise<{type: string, message: string, transactionId?: string}>}
  */
-async function processPayment(paymentId, amount, currency) {
+async function processPayment(paymentId, amount, currency, retryCount = 0) {
   log.info('Processing payment through mock gateway', {
-    payment_id: paymentId, amount, currency, component: 'mock_gateway',
+    payment_id: paymentId, amount, currency, retry_count: retryCount, component: 'mock_gateway',
   });
 
   // Simulate network latency
@@ -87,6 +94,53 @@ async function processPayment(paymentId, amount, currency) {
     log.error('Fatal gateway error (deterministic)', { payment_id: paymentId, error: 'CARD_DECLINED', latency_ms: latency });
     return { type: 'FATAL_ERROR', message: 'CARD_DECLINED' };
   }
+
+  // ── Demo failure modes (rely on persisted retry_count from PostgreSQL) ──
+
+  // 201: Fail once, then succeed
+  if (amount === 201) {
+    if (retryCount < 1) {
+      log.warn('Demo mode: fail once then succeed — failing attempt', { payment_id: paymentId, retry_count: retryCount });
+      return { type: 'RETRYABLE_ERROR', message: 'GATEWAY_TIMEOUT' };
+    }
+    const transactionId = generateTransactionId();
+    log.info('Demo mode: fail once then succeed — succeeding', { payment_id: paymentId, retry_count: retryCount, transaction_id: transactionId });
+    return { type: 'SUCCESS', message: 'Payment processed successfully', transactionId };
+  }
+
+  // 202: Fail twice, then succeed
+  if (amount === 202) {
+    if (retryCount < 2) {
+      const error = retryCount === 0 ? 'GATEWAY_TIMEOUT' : 'SERVICE_UNAVAILABLE';
+      log.warn('Demo mode: fail twice then succeed — failing attempt', { payment_id: paymentId, retry_count: retryCount, error });
+      return { type: 'RETRYABLE_ERROR', message: error };
+    }
+    const transactionId = generateTransactionId();
+    log.info('Demo mode: fail twice then succeed — succeeding', { payment_id: paymentId, retry_count: retryCount, transaction_id: transactionId });
+    return { type: 'SUCCESS', message: 'Payment processed successfully', transactionId };
+  }
+
+  // 203: Always retryable failure (will eventually exhaust retries → DEAD_LETTERED)
+  if (amount === 203) {
+    const errors = ['GATEWAY_TIMEOUT', 'SERVICE_UNAVAILABLE', 'NETWORK_ERROR', 'TEMPORARY_FAILURE', 'RATE_LIMITED'];
+    const error = errors[retryCount % errors.length];
+    log.warn('Demo mode: always fail — retryable error', { payment_id: paymentId, retry_count: retryCount, error });
+    return { type: 'RETRYABLE_ERROR', message: error };
+  }
+
+  // 204: Timeout on first attempt, then succeed
+  if (amount === 204) {
+    if (retryCount < 1) {
+      log.warn('Demo mode: timeout then succeed — simulating timeout', { payment_id: paymentId, retry_count: retryCount });
+      await sleep(config.timeoutMs);
+      return { type: 'RETRYABLE_ERROR', message: 'GATEWAY_TIMEOUT' };
+    }
+    const transactionId = generateTransactionId();
+    log.info('Demo mode: timeout then succeed — succeeding', { payment_id: paymentId, retry_count: retryCount, transaction_id: transactionId });
+    return { type: 'SUCCESS', message: 'Payment processed successfully', transactionId };
+  }
+
+  // ── Random outcomes for non-deterministic amounts ──
 
   // Simulate timeout
   if (Math.random() * 100 < config.timeoutRate) {

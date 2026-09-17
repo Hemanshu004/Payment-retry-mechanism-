@@ -23,7 +23,13 @@ async function startWorker() {
     throw new Error('REDIS_URL environment variable is required');
   }
 
-  connection = new IORedis(url, { maxRetriesPerRequest: null });
+  // Enable TLS for managed Redis (e.g., Upstash uses rediss:// URLs)
+  const redisOpts = { maxRetriesPerRequest: null };
+  if (url.startsWith('rediss://')) {
+    redisOpts.tls = {};
+  }
+
+  connection = new IORedis(url, redisOpts);
 
   const concurrency = parseInt(process.env.WORKER_CONCURRENCY || '1', 10);
 

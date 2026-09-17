@@ -20,6 +20,8 @@ const {
   getClient,
   lockPaymentForProcessing,
   updatePaymentStatus,
+  insertPaymentAttempt,
+  updateProviderTransactionId,
 } = require('./db');
 const { processPayment } = require('./gateway');
 const { createPaymentLogger } = require('./logger');
@@ -84,12 +86,16 @@ async function processPaymentJob(job) {
 
   // ══════════════════════════════════════════════════════════════════════
   // GATEWAY CALL (outside any transaction / connection)
+  // Pass retry_count from PostgreSQL so demo modes can make deterministic
+  // decisions without relying on volatile in-memory state.
   // ══════════════════════════════════════════════════════════════════════
-  plog.info('Calling payment gateway');
+  plog.info('Calling payment gateway', { retry_count: payment.retry_count });
+
+  const currentAttempt = payment.retry_count + 1; // 1-indexed attempt number
 
   let gatewayResult;
   try {
-    gatewayResult = await processPayment(paymentId, payment.amount, payment.currency);
+    gatewayResult = await processPayment(paymentId, payment.amount, payment.currency, payment.retry_count);
   } catch (gatewayErr) {
     plog.error('Unexpected gateway error', { error: gatewayErr.message });
     gatewayResult = { type: 'RETRYABLE_ERROR', message: 'UNEXPECTED_ERROR' };
@@ -112,11 +118,25 @@ async function processPaymentJob(job) {
 
     let finalStatus;
 
+    // Log this attempt to payment_attempts table (inside the same transaction)
+    await insertPaymentAttempt(
+      client2,
+      paymentId,
+      currentAttempt,
+      gatewayResult.type,
+      gatewayResult.message,
+      gatewayResult.type !== 'SUCCESS' ? gatewayResult.message : null
+    );
+
     switch (gatewayResult.type) {
       case 'SUCCESS':
         finalStatus = 'SUCCESS';
         await updatePaymentStatus(client2, paymentId, finalStatus);
-        plog.info('Payment successful', { transaction_id: gatewayResult.transactionId });
+        // Persist the provider transaction ID from the gateway
+        if (gatewayResult.transactionId) {
+          await updateProviderTransactionId(client2, paymentId, gatewayResult.transactionId);
+        }
+        plog.info('Payment successful', { transaction_id: gatewayResult.transactionId, attempt: currentAttempt });
         break;
 
       case 'FATAL_ERROR':
@@ -124,7 +144,7 @@ async function processPaymentJob(job) {
         await updatePaymentStatus(client2, paymentId, finalStatus, {
           failure_reason: gatewayResult.message,
         });
-        plog.error('Payment failed permanently', { failure_reason: gatewayResult.message });
+        plog.error('Payment failed permanently', { failure_reason: gatewayResult.message, attempt: currentAttempt });
         // DO NOT throw an error here. We want BullMQ to mark this job as completed, NOT failed.
         break;
 
@@ -137,7 +157,7 @@ async function processPaymentJob(job) {
           failure_reason: gatewayResult.message,
         });
         plog.warn('Payment encountered temporary failure, delegating retry to BullMQ', {
-          retry_count: newRetryCount,
+          retry_count: newRetryCount, attempt: currentAttempt,
         });
         
         await client2.query('COMMIT');
@@ -155,7 +175,7 @@ async function processPaymentJob(job) {
       await client2.query('COMMIT');
     }
 
-    plog.info('Payment processing complete', { final_status: finalStatus });
+    plog.info('Payment processing complete', { final_status: finalStatus, attempt: currentAttempt });
   } catch (err) {
     try { await client2.query('ROLLBACK'); } catch (_) {}
     plog.error('Error in phase 2', { error: err.message });

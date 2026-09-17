@@ -25,7 +25,13 @@ async function startReconciliation() {
   const url = process.env.REDIS_URL;
   if (!url) throw new Error('REDIS_URL required for reconciliation');
 
-  connection = new IORedis(url, { maxRetriesPerRequest: null });
+  // Enable TLS for managed Redis (e.g., Upstash uses rediss:// URLs)
+  const redisOpts = { maxRetriesPerRequest: null };
+  if (url.startsWith('rediss://')) {
+    redisOpts.tls = {};
+  }
+
+  connection = new IORedis(url, redisOpts);
   queue = new Queue('payment_jobs', { connection });
 
   log.info('Starting reconciliation scanner', { interval_ms: SCAN_INTERVAL_MS });

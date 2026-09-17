@@ -24,6 +24,8 @@ async function initPool() {
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,
+    // Enable SSL for managed databases (e.g., Neon URLs include sslmode=require)
+    ssl: connectionString.includes('sslmode=require') ? { rejectUnauthorized: false } : false,
   });
 
   // Verify connectivity

@@ -16,8 +16,13 @@ async function initQueue() {
     throw new Error('REDIS_URL environment variable is required');
   }
 
-  // Use maxRetriesPerRequest: null to allow BullMQ to handle connection blocking safely
-  connection = new IORedis(url, { maxRetriesPerRequest: null });
+  // Enable TLS for managed Redis (e.g., Upstash uses rediss:// URLs)
+  const redisOpts = { maxRetriesPerRequest: null };
+  if (url.startsWith('rediss://')) {
+    redisOpts.tls = {};
+  }
+
+  connection = new IORedis(url, redisOpts);
   
   queue = new Queue('payment_jobs', { connection });
   console.log(JSON.stringify({
@@ -58,4 +63,12 @@ async function closeQueue() {
   }));
 }
 
-module.exports = { initQueue, addPaymentJob, closeQueue };
+/**
+ * Get the BullMQ queue instance (for reading job counts, etc.).
+ * Returns null if the queue has not been initialized yet.
+ */
+function getQueue() {
+  return queue;
+}
+
+module.exports = { initQueue, addPaymentJob, closeQueue, getQueue };

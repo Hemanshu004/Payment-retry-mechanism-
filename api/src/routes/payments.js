@@ -38,6 +38,7 @@ function mapRow(row) {
     max_retries: row.max_retries,
     next_retry_at: row.next_retry_at,
     failure_reason: row.failure_reason,
+    provider_transaction_id: row.provider_transaction_id || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -55,6 +56,37 @@ router.get('/', async (_req, res) => {
     console.error(JSON.stringify({
       level: 'error', time: new Date().toISOString(),
       service: 'payment-api', msg: 'Failed to list payments', error: err.message,
+    }));
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── GET /payments/:id ────────────────────────────────────────────────────────
+
+router.get('/:id', async (req, res) => {
+  try {
+    const paymentResult = await query(
+      'SELECT * FROM payments WHERE id = $1',
+      [req.params.id]
+    );
+
+    if (!paymentResult.rows[0]) {
+      return res.status(404).json({ error: 'Payment not found' });
+    }
+
+    const attemptsResult = await query(
+      'SELECT attempt_number, status, gateway_response, error_message, created_at FROM payment_attempts WHERE payment_id = $1 ORDER BY attempt_number ASC',
+      [req.params.id]
+    );
+
+    res.json({
+      payment: mapRow(paymentResult.rows[0]),
+      attempts: attemptsResult.rows,
+    });
+  } catch (err) {
+    console.error(JSON.stringify({
+      level: 'error', time: new Date().toISOString(),
+      service: 'payment-api', msg: 'Failed to get payment details', error: err.message,
     }));
     res.status(500).json({ error: 'Internal server error' });
   }
